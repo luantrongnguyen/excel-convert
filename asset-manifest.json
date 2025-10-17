@@ -1,0 +1,15 @@
+{
+  "files": {
+    "main.css": "/excel-convert/static/css/main.f4a5a575.css",
+    "main.js": "/excel-convert/static/js/main.617b6f2f.js",
+    "static/js/453.086dd0da.chunk.js": "/excel-convert/static/js/453.086dd0da.chunk.js",
+    "index.html": "/excel-convert/index.html",
+    "main.f4a5a575.css.map": "/excel-convert/static/css/main.f4a5a575.css.map",
+    "main.617b6f2f.js.map": "/excel-convert/static/js/main.617b6f2f.js.map",
+    "453.086dd0da.chunk.js.map": "/excel-convert/static/js/453.086dd0da.chunk.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.f4a5a575.css",
+    "static/js/main.617b6f2f.js"
+  ]
+}
