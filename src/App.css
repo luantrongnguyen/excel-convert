@@ -85,12 +85,65 @@
 }
 
 .template-columns {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
   max-height: 70vh;
   overflow-y: auto;
   padding-right: 10px;
+}
+
+.template-titles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  background-color: #f8f9fa;
+  padding: 15px;
+  border-radius: 8px;
+  border: 1px solid #dee2e6;
+}
+
+.template-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background-color: white;
+  border-radius: 6px;
+  border: 1px solid #e9ecef;
+  font-weight: bold;
+  color: #495057;
+}
+
+.title-text {
+  font-size: 14px;
+}
+
+.template-mappings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 15px;
+}
+
+.template-mapping {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 12px;
+  background-color: #fff;
+  min-height: 150px;
+  display: flex;
+  flex-direction: column;
+}
+
+.mapping-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-weight: bold;
+  color: #333;
+  font-size: 14px;
+  flex-shrink: 0;
 }
 
 .data-columns {

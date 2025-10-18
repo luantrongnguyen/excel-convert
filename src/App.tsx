@@ -33,10 +33,8 @@ const App: React.FC = () => {
     complete: null,
   });
   const [defaultValues, setDefaultValues] = useState<Record<string, string>>({});
-  const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
   const [dragOverTarget, setDragOverTarget] = useState<string | null>(null);
   const [showInstructions, setShowInstructions] = useState(false);
-  const [pendingExport, setPendingExport] = useState(false);
 
   const parseExcelFile = (file: File): Promise<ExcelData> => {
     return new Promise((resolve, reject) => {
@@ -101,7 +99,6 @@ const App: React.FC = () => {
   });
 
   const handleDragStart = (e: React.DragEvent, column: string) => {
-    setDraggedColumn(column);
     e.dataTransfer.effectAllowed = 'move';
     // Allow scrolling during drag
     e.dataTransfer.setData('text/plain', column);
@@ -121,7 +118,6 @@ const App: React.FC = () => {
   };
 
   const handleDragEnd = () => {
-    setDraggedColumn(null);
     setDragOverTarget(null);
     // Remove dragging class
     document.body.classList.remove('dragging');
@@ -138,7 +134,6 @@ const App: React.FC = () => {
       const newMappings = [...columnMappings];
       newMappings[templateColumnIndex].dataColumn = draggedColumnName;
       setColumnMappings(newMappings);
-      setDraggedColumn(null);
       
       console.log(`Template column ${templateColumnIndex} mapped to:`, draggedColumnName);
     }
@@ -170,7 +165,6 @@ const App: React.FC = () => {
       }
       
       setDobMapping(newDobMapping);
-      setDraggedColumn(null);
       
       console.log(`DOB ${dobType} mapped to:`, draggedColumnName);
       console.log('Updated DOB mapping:', newDobMapping);
@@ -275,21 +269,18 @@ const App: React.FC = () => {
 
   const showExportInstructions = () => {
     setShowInstructions(true);
-    setPendingExport(true);
   };
 
   const confirmExport = () => {
     setShowInstructions(false);
-    setPendingExport(false);
     generateOutput();
   };
 
   const cancelExport = () => {
     setShowInstructions(false);
-    setPendingExport(false);
   };
 
-  const generateOutput = () => {
+  const generateOutput = async () => {
     if (!templateData || !dataFile) return;
 
     console.log('Default values:', defaultValues);
@@ -300,18 +291,22 @@ const App: React.FC = () => {
     const totalRecords = dataFile.data.length;
     const totalFiles = Math.ceil(totalRecords / maxRecords);
 
+    console.log(`Debug: totalRecords=${totalRecords}, maxRecords=${maxRecords}, totalFiles=${totalFiles}`);
+
     for (let fileIndex = 0; fileIndex < totalFiles; fileIndex++) {
       const startIndex = fileIndex * maxRecords;
       const endIndex = Math.min(startIndex + maxRecords, totalRecords);
       const results: any[][] = [];
+
+      console.log(`Debug: Creating file ${fileIndex + 1}/${totalFiles}, records ${startIndex}-${endIndex-1}`);
 
       for (let i = startIndex; i < endIndex; i++) {
         const row: any[] = [];
         
         columnMappings.forEach((mapping, index) => {
           if (mapping.templateColumn === 'No') {
-            // Auto-increment No column starting from 1 for each file
-            row.push((i - startIndex) + 1);
+            // Auto-increment No column starting from 1 globally across all files
+            row.push(i + 1);
           } else if (mapping.templateColumn === 'CustomerType') {
             // Default value for CustomerType
             row.push('Reward');
@@ -341,7 +336,7 @@ const App: React.FC = () => {
               const defaultValue = defaultValues[mapping.templateColumn] || mapping.defaultValue || '';
               row.push(ensureExcelCompatibility(defaultValue, mapping.templateColumn));
             }
-          } else if (mapping.templateColumn === 'DateOfBirth') {
+          } else if (mapping.templateColumn === 'DateOfBirth' || mapping.templateColumn === 'Birthday') {
             // Handle DOB mapping - 2 options
             let dobValue = '';
             
@@ -354,7 +349,7 @@ const App: React.FC = () => {
                 // Convert mm-dd-yyyy to mm/dd/yyyy
                 dobValue = completeDate.toString().replace(/-/g, '/');
               } else {
-                dobValue = defaultValues['DateOfBirth'] || '';
+                dobValue = defaultValues['DateOfBirth'] ||defaultValues['Birthday']  || '';
               }
             } else if (dobMapping.month && dobMapping.day) {
               // Option 1: Separate columns
@@ -384,11 +379,11 @@ const App: React.FC = () => {
                 }
               } else {
                 // Use default value if month or day is missing
-                dobValue = defaultValues['DateOfBirth'] || '';
+                dobValue = defaultValues['DateOfBirth'] || defaultValues['Birthday']  || '';
               }
             } else {
               // Use default value if DOB mapping is incomplete
-              dobValue = defaultValues['DateOfBirth'] || '';
+              dobValue = defaultValues['DateOfBirth'] || defaultValues['Birthday']  || '';
             }
             
             row.push(ensureExcelCompatibility(dobValue, mapping.templateColumn));
@@ -421,7 +416,13 @@ const App: React.FC = () => {
       });
       
       const fileName = `output_part_${String(fileIndex + 1).padStart(3, '0')}.xlsx`;
+      console.log(`Debug: Saving file ${fileName} with ${results.length} records`);
       saveAs(blob, fileName);
+      
+      // Add delay between downloads to avoid browser limits
+      if (fileIndex < totalFiles - 1) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
     }
 
     console.log(`Exported ${totalFiles} files with ${totalRecords} total records`);
@@ -485,95 +486,108 @@ const App: React.FC = () => {
 
             <div className="template-columns">
               <h4>Template Columns</h4>
-              {templateData.columns.map((column, index) => (
-                <div key={column} className="template-column">
-                  <div className="column-header">
-                    <span>{column}</span>
+              
+              {/* Template Titles Row */}
+              {/* <div className="template-titles">
+                {templateData.columns.map((column, index) => (
+                  <div key={column} className="template-title">
+                    <span className="title-text">{column}</span>
                     {column === 'No' ? (
                       <span className="auto-column">Auto-increment</span>
                     ) : columnMappings[index].dataColumn ? (
                       <span className="mapped-column">→ {columnMappings[index].dataColumn}</span>
                     ) : null}
                   </div>
+                ))}
+              </div> */}
+              
+              {/* Mapping Areas - Exclude No column */}
+              <div className="template-mappings">
+                {templateData.columns.filter(column => column !== 'No').map((column, index) => {
+                  const originalIndex = templateData.columns.indexOf(column);
+                  return (
+                    <div key={column} className="template-mapping">
+                      <div className="mapping-header">
+                        <span>{column}</span>
+                        {columnMappings[originalIndex].dataColumn ? (
+                          <span className="mapped-column">→ {columnMappings[originalIndex].dataColumn}</span>
+                        ) : null}
+                      </div>
                   
-                  {column === 'No' ? (
-                    <div className="auto-increment-info">
-                      <span className="auto-text">Số tự tăng (1, 2, 3, ...)</span>
-                    </div>
-                  ) : column === 'DateOfBirth' ? (
-                    <div className="dob-mapping">
-                      <div className="dob-options">
-                        <div className="dob-option">
-                          <h5>Option 1: Separate Columns</h5>
-                          <div className="dob-slots">
-                            <div 
-                              className={`dob-slot required ${dragOverTarget === 'dob-month' ? 'drag-over' : ''} ${dobMapping.month ? 'mapped' : ''}`}
-                              onDragOver={(e) => handleDragOver(e, 'dob-month')}
-                              onDragLeave={handleDragLeave}
-                              onDrop={(e) => handleDOBDrop(e, 'month')}
-                            >
-                              <span>Month: {dobMapping.month || 'Drop here'} *</span>
+                      {column === 'DateOfBirth' || column === 'Birthday' ? (
+                        <div className="dob-mapping">
+                          <div className="dob-options">
+                            <div className="dob-option">
+                              <h5>Option 1: Separate Columns</h5>
+                              <div className="dob-slots">
+                                <div 
+                                  className={`dob-slot required ${dragOverTarget === 'dob-month' ? 'drag-over' : ''} ${dobMapping.month ? 'mapped' : ''}`}
+                                  onDragOver={(e) => handleDragOver(e, 'dob-month')}
+                                  onDragLeave={handleDragLeave}
+                                  onDrop={(e) => handleDOBDrop(e, 'month')}
+                                >
+                                  <span>Month: {dobMapping.month || 'Drop here'} *</span>
+                                </div>
+                                <div 
+                                  className={`dob-slot required ${dragOverTarget === 'dob-day' ? 'drag-over' : ''} ${dobMapping.day ? 'mapped' : ''}`}
+                                  onDragOver={(e) => handleDragOver(e, 'dob-day')}
+                                  onDragLeave={handleDragLeave}
+                                  onDrop={(e) => handleDOBDrop(e, 'day')}
+                                >
+                                  <span>Day: {dobMapping.day || 'Drop here'} *</span>
+                                </div>
+                                <div 
+                                  className={`dob-slot optional ${dragOverTarget === 'dob-year' ? 'drag-over' : ''} ${dobMapping.year ? 'mapped' : ''}`}
+                                  onDragOver={(e) => handleDragOver(e, 'dob-year')}
+                                  onDragLeave={handleDragLeave}
+                                  onDrop={(e) => handleDOBDrop(e, 'year')}
+                                >
+                                  <span>Year: {dobMapping.year || 'Drop here (optional)'}</span>
+                                </div>
+                              </div>
                             </div>
-                            <div 
-                              className={`dob-slot required ${dragOverTarget === 'dob-day' ? 'drag-over' : ''} ${dobMapping.day ? 'mapped' : ''}`}
-                              onDragOver={(e) => handleDragOver(e, 'dob-day')}
-                              onDragLeave={handleDragLeave}
-                              onDrop={(e) => handleDOBDrop(e, 'day')}
-                            >
-                              <span>Day: {dobMapping.day || 'Drop here'} *</span>
-                            </div>
-                            <div 
-                              className={`dob-slot optional ${dragOverTarget === 'dob-year' ? 'drag-over' : ''} ${dobMapping.year ? 'mapped' : ''}`}
-                              onDragOver={(e) => handleDragOver(e, 'dob-year')}
-                              onDragLeave={handleDragLeave}
-                              onDrop={(e) => handleDOBDrop(e, 'year')}
-                            >
-                              <span>Year: {dobMapping.year || 'Drop here (optional)'}</span>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="dob-option">
-                          <h5>Option 2: Complete Date Column</h5>
-                          <div className="dob-complete-slot">
-                            <div 
-                              className={`dob-slot complete ${dragOverTarget === 'dob-complete' ? 'drag-over' : ''} ${dobMapping.complete ? 'mapped' : ''}`}
-                              onDragOver={(e) => handleDragOver(e, 'dob-complete')}
-                              onDragLeave={handleDragLeave}
-                              onDrop={(e) => handleDOBDrop(e, 'complete')}
-                            >
-                              <span>Complete Date: {dobMapping.complete || 'Drop here (mm-dd-yyyy or mm/dd/yyyy)'}</span>
+                            <div className="dob-option">
+                              <h5>Option 2: Complete Date Column</h5>
+                              <div className="dob-complete-slot">
+                                <div 
+                                  className={`dob-slot complete ${dragOverTarget === 'dob-complete' ? 'drag-over' : ''} ${dobMapping.complete ? 'mapped' : ''}`}
+                                  onDragOver={(e) => handleDragOver(e, 'dob-complete')}
+                                  onDragLeave={handleDragLeave}
+                                  onDrop={(e) => handleDOBDrop(e, 'complete')}
+                                >
+                                  <span>Complete Date: {dobMapping.complete || 'Drop here (mm-dd-yyyy or mm/dd/yyyy)'}</span>
+                                </div>
+                              </div>
                             </div>
                           </div>
                         </div>
+                      ) : (
+                        <div 
+                          className={`drop-zone ${dragOverTarget === `template-${originalIndex}` ? 'drag-over' : ''}`}
+                          onDragOver={(e) => handleDragOver(e, `template-${originalIndex}`)}
+                          onDragLeave={handleDragLeave}
+                          onDrop={(e) => handleDrop(e, originalIndex)}
+                        >
+                          {columnMappings[originalIndex].dataColumn ? (
+                            <span className="mapped">Mapped to: {columnMappings[originalIndex].dataColumn}</span>
+                          ) : (
+                            <span className="empty">Drop column here</span>
+                          )}
+                        </div>
+                      )}
+                      
+                      <div className="default-value">
+                        <input
+                          type="text"
+                          placeholder="Default value"
+                          value={defaultValues[column] || ''}
+                          onChange={(e) => updateDefaultValue(column, e.target.value)}
+                        />
                       </div>
                     </div>
-                  ) : (
-                    <div 
-                      className={`drop-zone ${dragOverTarget === `template-${index}` ? 'drag-over' : ''}`}
-                      onDragOver={(e) => handleDragOver(e, `template-${index}`)}
-                      onDragLeave={handleDragLeave}
-                      onDrop={(e) => handleDrop(e, index)}
-                    >
-                      {columnMappings[index].dataColumn ? (
-                        <span className="mapped">Mapped to: {columnMappings[index].dataColumn}</span>
-                      ) : (
-                        <span className="empty">Drop column here</span>
-                      )}
-                    </div>
-                  )}
-                  
-                  {column !== 'No' && (
-                    <div className="default-value">
-                      <input
-                        type="text"
-                        placeholder="Default value"
-                        value={defaultValues[column] || ''}
-                        onChange={(e) => updateDefaultValue(column, e.target.value)}
-                      />
-                    </div>
-                  )}
-                </div>
-              ))}
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>
@@ -599,12 +613,12 @@ const App: React.FC = () => {
       {showInstructions && (
         <div className="modal-overlay">
           <div className="modal-content">
-            <h3>Hướng dẫn sử dụng file Excel</h3>
+            <h3>Xác nhận trên 18 tuổi</h3>
             <div className="instructions">
-              <p><strong>Để sử dụng các files excel này:</strong></p>
+              <p><strong>Đọc trước hướng dẫn sử dụng trước khi dùng:</strong></p>
               <ol>
                 <li>Khi tải xuống phải mở các file lên và bấm <strong>Ctrl + S</strong> xong là có thể dùng để import</li>
-                <li>Nếu sau khi đã bấm <strong>Ctrl + S</strong> xong mà vẫn không thể import được thì tìm <strong>Brian Nguyen from team Tech Support</strong> để fix cho</li>
+                <li>Nếu sau khi đã bấm <strong>Ctrl + S</strong> xong mà vẫn không thể import được thì tìm <strong>Brian Nguyen đẹp trai vô địch khắp vũ trụ từ team Tech Support</strong> để fix cho :D</li>
               </ol>
             </div>
             <div className="modal-buttons">
