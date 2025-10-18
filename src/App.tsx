@@ -35,6 +35,8 @@ const App: React.FC = () => {
   const [defaultValues, setDefaultValues] = useState<Record<string, string>>({});
   const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
   const [dragOverTarget, setDragOverTarget] = useState<string | null>(null);
+  const [showInstructions, setShowInstructions] = useState(false);
+  const [pendingExport, setPendingExport] = useState(false);
 
   const parseExcelFile = (file: File): Promise<ExcelData> => {
     return new Promise((resolve, reject) => {
@@ -194,20 +196,22 @@ const App: React.FC = () => {
     // Convert to string first to handle all cases
     const stringValue = String(value).trim();
     
-    // Handle numbers
+    // Handle numbers - ensure proper number format
     if (!isNaN(Number(stringValue)) && stringValue !== '') {
       const numValue = Number(stringValue);
-      // Keep as number if it's a valid number
+      // Return as number for proper Excel formatting
       return numValue;
     }
     
-    // Handle dates - try to parse as date
+    // Handle dates - format as proper Excel date
     if (columnName.toLowerCase().includes('date') || columnName.toLowerCase().includes('dob') || columnName.toLowerCase().includes('visit')) {
       const dateValue = new Date(stringValue);
       if (!isNaN(dateValue.getTime())) {
-        // Return as Excel date serial number for better compatibility
-        const excelDate = (dateValue.getTime() - new Date(1900, 0, 1).getTime()) / (24 * 60 * 60 * 1000) + 1;
-        return excelDate;
+        // Return as properly formatted date string for Excel
+        const year = dateValue.getFullYear();
+        const month = String(dateValue.getMonth() + 1).padStart(2, '0');
+        const day = String(dateValue.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
       }
     }
     
@@ -216,7 +220,7 @@ const App: React.FC = () => {
       return stringValue.toLowerCase() === 'true';
     }
     
-    // Return as string for everything else
+    // Return as string for everything else - ensure proper encoding
     return stringValue;
   };
 
@@ -269,6 +273,22 @@ const App: React.FC = () => {
     }
   };
 
+  const showExportInstructions = () => {
+    setShowInstructions(true);
+    setPendingExport(true);
+  };
+
+  const confirmExport = () => {
+    setShowInstructions(false);
+    setPendingExport(false);
+    generateOutput();
+  };
+
+  const cancelExport = () => {
+    setShowInstructions(false);
+    setPendingExport(false);
+  };
+
   const generateOutput = () => {
     if (!templateData || !dataFile) return;
 
@@ -290,8 +310,8 @@ const App: React.FC = () => {
         
         columnMappings.forEach((mapping, index) => {
           if (mapping.templateColumn === 'No') {
-            // Auto-increment No column starting from 3 for each file
-            row.push((i - startIndex) + 3);
+            // Auto-increment No column starting from 1 for each file
+            row.push((i - startIndex) + 1);
           } else if (mapping.templateColumn === 'CustomerType') {
             // Default value for CustomerType
             row.push('Reward');
@@ -382,79 +402,20 @@ const App: React.FC = () => {
         results.push(row);
       }
 
-      // Create Excel file with proper metadata and formatting
-      const ws = XLSX.utils.aoa_to_sheet([templateData.columns, ...results]);
+      // Create Excel file with minimal structure for maximum compatibility
+      const ws = XLSX.utils.aoa_to_sheet(results);
       
-      // Set column widths for better formatting
-      const colWidths = templateData.columns.map(() => ({ wch: 15 }));
-      ws['!cols'] = colWidths;
-      
-      // Set row heights
-      ws['!rows'] = [{ hpt: 20 }];
-      
-      // Add proper cell formatting
-      const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
-      for (let R = range.s.r; R <= range.e.r; ++R) {
-        for (let C = range.s.c; C <= range.e.c; ++C) {
-          const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
-          if (!ws[cellAddress]) continue;
-          
-          // Set cell style for header row
-          if (R === 0) {
-            ws[cellAddress].s = {
-              font: { bold: true, color: { rgb: "FFFFFF" } },
-              fill: { fgColor: { rgb: "366092" } },
-              alignment: { horizontal: "center", vertical: "center" },
-              border: {
-                top: { style: "thin", color: { rgb: "000000" } },
-                bottom: { style: "thin", color: { rgb: "000000" } },
-                left: { style: "thin", color: { rgb: "000000" } },
-                right: { style: "thin", color: { rgb: "000000" } }
-              }
-            };
-          } else {
-            // Set cell style for data rows
-            ws[cellAddress].s = {
-              alignment: { vertical: "center" },
-              border: {
-                top: { style: "thin", color: { rgb: "CCCCCC" } },
-                bottom: { style: "thin", color: { rgb: "CCCCCC" } },
-                left: { style: "thin", color: { rgb: "CCCCCC" } },
-                right: { style: "thin", color: { rgb: "CCCCCC" } }
-              }
-            };
-          }
-        }
-      }
-      
-      // Create workbook with proper metadata
+      // Create workbook - minimal setup
       const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
       
-      // Add workbook properties
-      wb.Props = {
-        Title: "Excel Data Export",
-        Subject: "Generated Excel File",
-        Author: "Excel Data Filler",
-        CreatedDate: new Date(),
-        Company: "Data Processing Tool"
-      };
-      
-      // Add worksheet properties
-      ws['!autofilter'] = { ref: `A1:${XLSX.utils.encode_cell({ r: results.length, c: templateData.columns.length - 1 })}` };
-      
-      XLSX.utils.book_append_sheet(wb, ws, 'Data');
-      
-      // Write with proper options for maximum compatibility
+      // Write with absolute minimal options
       const excelBuffer = XLSX.write(wb, { 
         bookType: 'xlsx', 
-        type: 'array',
-        compression: true,
-        Props: wb.Props,
-        cellStyles: true,
-        cellNF: false,
-        cellHTML: false
+        type: 'array'
       });
       
+      // Create blob with standard MIME type
       const blob = new Blob([excelBuffer], { 
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
       });
@@ -628,9 +589,33 @@ const App: React.FC = () => {
             <p><strong>Mapped Columns:</strong> {columnMappings.filter(m => m.dataColumn).length} of {columnMappings.length}</p>
             <p><strong>Total Records:</strong> {dataFile.data.length} (will create {Math.ceil(dataFile.data.length / 900)} files)</p>
           </div>
-          <button onClick={generateOutput} className="export-button">
-            Export Multiple Excel Files (900 records per file, with headers)
+          <button onClick={showExportInstructions} className="export-button">
+            Export Multiple Excel Files (900 records per file, no headers)
           </button>
+        </div>
+      )}
+
+      {/* Instructions Popup */}
+      {showInstructions && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <h3>Hướng dẫn sử dụng file Excel</h3>
+            <div className="instructions">
+              <p><strong>Để sử dụng các files excel này:</strong></p>
+              <ol>
+                <li>Khi tải xuống phải mở các file lên và bấm <strong>Ctrl + S</strong> xong là có thể dùng để import</li>
+                <li>Nếu sau khi đã bấm <strong>Ctrl + S</strong> xong mà vẫn không thể import được thì tìm <strong>Brian Nguyen from team Tech Support</strong> để fix cho</li>
+              </ol>
+            </div>
+            <div className="modal-buttons">
+              <button onClick={cancelExport} className="cancel-button">
+                Hủy
+              </button>
+              <button onClick={confirmExport} className="confirm-button">
+                Đã Hiểu
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
