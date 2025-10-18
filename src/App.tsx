@@ -185,6 +185,41 @@ const App: React.FC = () => {
     }));
   };
 
+  const ensureExcelCompatibility = (value: any, columnName: string): any => {
+    // Handle different data types for Excel compatibility
+    if (value === null || value === undefined || value === '') {
+      return '';
+    }
+    
+    // Convert to string first to handle all cases
+    const stringValue = String(value).trim();
+    
+    // Handle numbers
+    if (!isNaN(Number(stringValue)) && stringValue !== '') {
+      const numValue = Number(stringValue);
+      // Keep as number if it's a valid number
+      return numValue;
+    }
+    
+    // Handle dates - try to parse as date
+    if (columnName.toLowerCase().includes('date') || columnName.toLowerCase().includes('dob') || columnName.toLowerCase().includes('visit')) {
+      const dateValue = new Date(stringValue);
+      if (!isNaN(dateValue.getTime())) {
+        // Return as Excel date serial number for better compatibility
+        const excelDate = (dateValue.getTime() - new Date(1900, 0, 1).getTime()) / (24 * 60 * 60 * 1000) + 1;
+        return excelDate;
+      }
+    }
+    
+    // Handle boolean values
+    if (stringValue.toLowerCase() === 'true' || stringValue.toLowerCase() === 'false') {
+      return stringValue.toLowerCase() === 'true';
+    }
+    
+    // Return as string for everything else
+    return stringValue;
+  };
+
   const formatLastVisit = (dateValue: any): string => {
     if (!dateValue || dateValue === '' || dateValue === null || dateValue === undefined) {
       return '';
@@ -272,19 +307,19 @@ const App: React.FC = () => {
                 // Special formatting for LastVisit column
                 if (mapping.templateColumn === 'LastVisit') {
                   const formattedDate = formatLastVisit(cellValue);
-                  row.push(formattedDate);
+                  row.push(ensureExcelCompatibility(formattedDate, mapping.templateColumn));
                 } else {
-                  row.push(cellValue);
+                  row.push(ensureExcelCompatibility(cellValue, mapping.templateColumn));
                 }
               } else {
                 // Use default value if data is missing or empty
                 const defaultValue = defaultValues[mapping.templateColumn] || mapping.defaultValue || '';
-                row.push(defaultValue);
+                row.push(ensureExcelCompatibility(defaultValue, mapping.templateColumn));
               }
             } else {
               // Use default value if column not found
               const defaultValue = defaultValues[mapping.templateColumn] || mapping.defaultValue || '';
-              row.push(defaultValue);
+              row.push(ensureExcelCompatibility(defaultValue, mapping.templateColumn));
             }
           } else if (mapping.templateColumn === 'DateOfBirth') {
             // Handle DOB mapping - 2 options
@@ -336,24 +371,94 @@ const App: React.FC = () => {
               dobValue = defaultValues['DateOfBirth'] || '';
             }
             
-            row.push(dobValue);
+            row.push(ensureExcelCompatibility(dobValue, mapping.templateColumn));
           } else {
             // Use default value for unmapped columns
             const defaultValue = defaultValues[mapping.templateColumn] || mapping.defaultValue || '';
-            row.push(defaultValue);
+            row.push(ensureExcelCompatibility(defaultValue, mapping.templateColumn));
           }
         });
         
         results.push(row);
       }
 
-      // Create Excel file with header
+      // Create Excel file with proper metadata and formatting
       const ws = XLSX.utils.aoa_to_sheet([templateData.columns, ...results]);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
       
-      const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-      const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      // Set column widths for better formatting
+      const colWidths = templateData.columns.map(() => ({ wch: 15 }));
+      ws['!cols'] = colWidths;
+      
+      // Set row heights
+      ws['!rows'] = [{ hpt: 20 }];
+      
+      // Add proper cell formatting
+      const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+      for (let R = range.s.r; R <= range.e.r; ++R) {
+        for (let C = range.s.c; C <= range.e.c; ++C) {
+          const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+          if (!ws[cellAddress]) continue;
+          
+          // Set cell style for header row
+          if (R === 0) {
+            ws[cellAddress].s = {
+              font: { bold: true, color: { rgb: "FFFFFF" } },
+              fill: { fgColor: { rgb: "366092" } },
+              alignment: { horizontal: "center", vertical: "center" },
+              border: {
+                top: { style: "thin", color: { rgb: "000000" } },
+                bottom: { style: "thin", color: { rgb: "000000" } },
+                left: { style: "thin", color: { rgb: "000000" } },
+                right: { style: "thin", color: { rgb: "000000" } }
+              }
+            };
+          } else {
+            // Set cell style for data rows
+            ws[cellAddress].s = {
+              alignment: { vertical: "center" },
+              border: {
+                top: { style: "thin", color: { rgb: "CCCCCC" } },
+                bottom: { style: "thin", color: { rgb: "CCCCCC" } },
+                left: { style: "thin", color: { rgb: "CCCCCC" } },
+                right: { style: "thin", color: { rgb: "CCCCCC" } }
+              }
+            };
+          }
+        }
+      }
+      
+      // Create workbook with proper metadata
+      const wb = XLSX.utils.book_new();
+      
+      // Add workbook properties
+      wb.Props = {
+        Title: "Excel Data Export",
+        Subject: "Generated Excel File",
+        Author: "Excel Data Filler",
+        CreatedDate: new Date(),
+        Company: "Data Processing Tool"
+      };
+      
+      // Add worksheet properties
+      ws['!protect'] = false;
+      ws['!autofilter'] = { ref: `A1:${XLSX.utils.encode_cell({ r: results.length, c: templateData.columns.length - 1 })}` };
+      
+      XLSX.utils.book_append_sheet(wb, ws, 'Data');
+      
+      // Write with proper options for maximum compatibility
+      const excelBuffer = XLSX.write(wb, { 
+        bookType: 'xlsx', 
+        type: 'array',
+        compression: true,
+        Props: wb.Props,
+        cellStyles: true,
+        cellNF: false,
+        cellHTML: false
+      });
+      
+      const blob = new Blob([excelBuffer], { 
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      });
       
       const fileName = `output_part_${String(fileIndex + 1).padStart(3, '0')}.xlsx`;
       saveAs(blob, fileName);
