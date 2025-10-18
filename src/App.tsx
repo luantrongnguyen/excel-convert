@@ -440,7 +440,6 @@ const App: React.FC = () => {
       };
       
       // Add worksheet properties
-      ws['!protect'] = false;
       ws['!autofilter'] = { ref: `A1:${XLSX.utils.encode_cell({ r: results.length, c: templateData.columns.length - 1 })}` };
       
       XLSX.utils.book_append_sheet(wb, ws, 'Data');
